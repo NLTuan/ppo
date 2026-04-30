@@ -1,0 +1,55 @@
+[project]
+name = "ppo"
+version = "0.1.0"
+description = "Proximal Policy Optimization (PPO) implemented from scratch"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0",
+    "gymnasium[classic-control]>=1.0.0",
+]
+
+# Install with:
+#   CPU:  uv sync --extra cpu
+#   GPU:  uv sync --extra cuda
+
+[project.optional-dependencies]
+cpu = [
+    "torch>=2.5",
+    "torchvision>=0.20",
+]
+cuda = [
+    "torch>=2.5",
+    "torchvision>=0.20",
+]
+
+# Declare cpu/cuda as mutually exclusive so uv resolves them independently.
+# Without this, uv tries to resolve both extras at once and hits a
+# conflicting-index error.
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "cuda" },
+    ]
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu",   extra = "cpu"  },
+    { index = "pytorch-cu124", extra = "cuda" },
+]
+torchvision = [
+    { index = "pytorch-cpu",   extra = "cpu"  },
+    { index = "pytorch-cu124", extra = "cuda" },
+]
+
+[[tool.uv.index]]
+name     = "pytorch-cpu"
+url      = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name     = "pytorch-cu124"
+url      = "https://download.pytorch.org/whl/cu124"
+explicit = true
