@@ -51,7 +51,15 @@ class Policy(nn.Module):
         action = dist.sample()
         return action, dist.log_prob(action)
 
+    def get_value(self, x):
+        return self.value_network(x)
 
+    def get_action_and_value(self, x, action=None):
+        logits = self.forward(x)
+        dist = Categorical(logits=logits)
+        if action is None:
+            action = dist.sample()
+        return action, dist.log_prob(action), dist.entropy(), self.get_value(x)
 
 def make_env(env_id, idx, capture_video, run_name):
     def thunk():
