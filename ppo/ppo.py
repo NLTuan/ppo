@@ -1,19 +1,44 @@
 import gymnasium as gym
-
+import numpy as np
 import torch
 from torch import nn, optim
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
+env_id            = "CartPole-v1"
+num_envs          = 4
+hidden_dim        = 256
+lr                = 3e-4
+gamma             = 0.99
+total_timesteps   = 100_000
+num_steps         = 128
+num_update_epochs = 1
+capture_video     = False
+run_name          = "ppo_cartpole"
+
+batch_size     = num_steps * num_envs
+num_iterations = total_timesteps // batch_size
+
 class Policy(nn.Module):
-    def __init__(self, env, hidden_dim):
+    def __init__(self, envs, hidden_dim):
         super().__init__()
+        obs_dim = np.array(envs.single_observation_space.shape).prod()
+        act_dim = envs.single_action_space.n
+
         self.policy_network = nn.Sequential(
-            nn.Linear(env.observation_space.shape[0], hidden_dim),
+            nn.Linear(obs_dim, hidden_dim),
             nn.Tanh(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.Tanh(),
-            nn.Linear(hidden_dim, env.action_space.n)
+            nn.Linear(hidden_dim, act_dim)
+        )
+
+        self.value_network = nn.Sequential(
+            nn.Linear(obs_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, 1)
         )
 
     def forward(self, x):
@@ -27,24 +52,35 @@ class Policy(nn.Module):
         return action, dist.log_prob(action)
 
 
-env = gym.make("CartPole-v1")
-state, info = env.reset()
+
+def make_env(env_id, idx, capture_video, run_name):
+    def thunk():
+        if capture_video and idx == 0:
+            env = gym.make(env_id, render_mode="rgb_array")
+            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+        else:
+            env = gym.make(env_id)
+
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        return env
+
+    return thunk
+
+envs = gym.vector.SyncVectorEnv([make_env(env_id, i, capture_video, run_name) for i in range(num_envs)])
+obs_dim = np.array(envs.single_observation_space.shape).prod()
+
+state, info = envs.reset()
 done = False
 truncated = False
-    
-policy = Policy(env, hidden_dim=256)
-opt = optim.Adam(policy.parameters(), lr=0.004)
 
+policy = Policy(envs, hidden_dim)
+opt = optim.Adam(policy.parameters(), lr=lr)
 
-
-total_steps = 100000
-batch_size = 1000
-num_iterations = total_steps // batch_size
-
-num_update_epochs = 1
-
-gamma = 0.99
-
+obs_buf   = torch.zeros(num_steps, num_envs, obs_dim)
+act_buf   = torch.zeros(num_steps, num_envs)
+rew_buf   = torch.zeros(num_steps, num_envs)
+done_buf  = torch.zeros(num_steps, num_envs)
+logp_buf  = torch.zeros(num_steps, num_envs)
 
 
 for i in range(num_iterations):
@@ -55,8 +91,7 @@ for i in range(num_iterations):
     returns = []
     for j in range(batch_size):
         if done or truncated:
-            state, info = env.reset()
-
+            state, info = envs.reset()
 
             eps_returns = []
             G = 0
@@ -74,13 +109,13 @@ for i in range(num_iterations):
 
         action, log_prob = policy.get_action(torch.tensor(state, dtype=torch.float32))
 
-        state, reward, done, truncated, info = env.step(action.item())
+        state, reward, done, truncated, info = envs.step(action.numpy())
 
         eps_rewards.append(reward)
         log_probs.append(log_prob)
 
     if eps_rewards:
-        state, info = env.reset()
+        state, info = envs.reset()
 
         eps_returns = []
         G = 0
@@ -106,4 +141,4 @@ for i in range(num_iterations):
     loss.backward()
     opt.step()
 
-env.close()
+envs.close()
