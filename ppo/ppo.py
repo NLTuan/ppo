@@ -90,15 +90,15 @@ state, info = envs.reset()
 done = False
 truncated = False
 
-agent = Agent(envs, hidden_dim)
-opt = optim.Adam(policy.parameters(), lr=lr)
+agent = Agent(envs, hidden_dim).to(device)
+optimizer = optim.Adam(agent.parameters(), lr=lr, eps=1e-5)
 
-obs_buf   = torch.zeros(num_steps, num_envs, obs_dim)
-act_buf   = torch.zeros(num_steps, num_envs)
-rew_buf   = torch.zeros(num_steps, num_envs)
-done_buf  = torch.zeros(num_steps, num_envs)
-logp_buf  = torch.zeros(num_steps, num_envs)
-val_buf   = torch.zeros(num_steps, num_envs)
+obs_buf   = torch.zeros(num_steps, num_envs, obs_dim).to(device)
+act_buf   = torch.zeros(num_steps, num_envs).to(device)
+rew_buf   = torch.zeros(num_steps, num_envs).to(device)
+done_buf  = torch.zeros(num_steps, num_envs).to(device)
+logp_buf  = torch.zeros(num_steps, num_envs).to(device)
+val_buf   = torch.zeros(num_steps, num_envs).to(device)
 
 obs = torch.Tensor(state).to(device)
 done = torch.zeros(num_envs).to(device)
@@ -118,7 +118,7 @@ for i in range(1, num_iterations + 1):
             action, logprob, _, value = agent.get_action_and_value(obs)
             val_buf[step] = value.flatten()
 
-        actions[step] = action
+        act_buf[step] = action
         logp_buf[step] = logprob
 
         obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
@@ -130,24 +130,22 @@ for i in range(1, num_iterations + 1):
             for info in infos["final_info"]:
                 if info and "episode" in info:
                     print(f"step={global_step}, episodic_return={info['episode']['r']}")
-        
+    with torch.no_grad():
+        next_value = agent.get_value(obs).reshape(1, -1)
+        advantages = torch.zeros_like(rew_buf).to(device)
+        lastgaelam = 0
 
-        with torch.no_grad():
-            next_value = agent.get_value(obs).reshape(1, -1)
-            advantages = torch.zeros_like(rewards).to(device)
-            lastgaelam = 0
-
-            for t in reversed(range(num_steps)):
-                if t == num_steps - 1:
-                    # last step (just take wtv has just happened)
-                    nextnonterminal = 1.0 - done
-                    nextvalues = value
-                else:
-                    next_nonterminal = 1.0 - done_buf[t+1]
-                    nextvalues = values[t+1]
-                delta = rew_buf[t] + gamma * next_value * nextnonterminal - values[t]
-                advantages[t] = lastgaelam = delta + gamma * gae_lambda * next_nonterminal * lastgaelam
-            returns = advantages + val_buf
+        for t in reversed(range(num_steps)):
+            if t == num_steps - 1:
+                # last step (just take wtv has just happened)
+                nextnonterminal = 1.0 - done
+                nextvalues = next_value
+            else:
+                nextnonterminal = 1.0 - done_buf[t+1]
+                nextvalues = val_buf[t+1]
+            delta = rew_buf[t] + gamma * nextvalues * nextnonterminal - val_buf[t]
+            advantages[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+        returns = advantages + val_buf
 
     
     b_obs = obs_buf.reshape((-1,) + envs.single_observation_space.shape)
@@ -169,24 +167,24 @@ for i in range(1, num_iterations + 1):
             mb_inds = b_inds[start:end]
 
             _, logprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
-            log_ratio = log_ratio - b_logprobs[mb_inds]
-            ratio = log_ratio.exp()
+            logratio = logprob - b_logprobs[mb_inds]
+            ratio = logratio.exp()
 
             with torch.no_grad():
                 old_approx_kl = (-logratio).mean()
-                approx_kl = ((ratio - 1) - log_ratio).mean()
+                approx_kl = ((ratio - 1) - logratio).mean()
                 clipfracs += [((ratio - 1.0).abs() > clip_coeff).float().mean().item()]
 
             mb_advs = b_advantages[mb_inds]
 
-            mb_advs = (mb_advs - mb_advs.mean())/(mb_advs.std + 1e-8)
+            mb_advs = (mb_advs - mb_advs.mean())/(mb_advs.std() + 1e-8)
 
             pg_loss1 = -mb_advs * ratio
             pg_loss2 = -mb_advs * torch.clamp(ratio, 1-clip_coeff, 1+clip_coeff)
 
             pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-            v_loss = 0.5 * ((newvalue - b_returns[mb_ids]) ** 2).mean()
+            v_loss = 0.5 * ((newvalue.view(-1) - b_returns[mb_inds]) ** 2).mean()
 
             entropy_loss = entropy.mean()
             loss = pg_loss + v_loss * vf_coeff - entropy_loss * entropy_coeff
