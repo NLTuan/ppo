@@ -10,9 +10,11 @@ num_envs          = 4
 hidden_dim        = 256
 lr                = 3e-4
 gamma             = 0.99
+gae_lambda        = 0.95
 total_timesteps   = 100_000
 num_steps         = 128
 num_update_epochs = 1
+clip_coeff        = 0.2
 capture_video     = False
 run_name          = "ppo_cartpole"
 
@@ -125,7 +127,30 @@ for i in range(1, num_iterations + 1):
                     print(f"step={global_step}, episodic_return={info['episode']['r']}")
         
 
+        with torch.no_grad():
+            next_value = agent.get_value(obs).reshape(1, -1)
+            advantages = torch.zeros_like(rewards).to(device)
+            lastgaelam = 0
 
+            for t in reversed(range(num_steps)):
+                if t == num_steps - 1:
+                    # last step (just take wtv has just happened)
+                    nextnonterminal = 1.0 - done
+                    nextvalues = value
+                else:
+                    next_nonterminal = 1.0 - done_buf[t+1]
+                    nextvalues = values[t+1]
+                delta = rew_buf[t] + gamma * next_value * nextnonterminal - values[t]
+                advantages[t] = lastgaelam = delta + gamma * gae_lambda * next_nonterminal * lastgaelam
+            returns = advantages + val_buf
+
+    
+    b_obs = obs_buf.reshape((-1,) + envs.single_observation_space.shape)
+    b_logprobs = logp_buf.reshape(-1)
+    b_actions = act_buf.reshape((-1,) + envs.single_action_space.shape)
+    b_advantages = advantages.reshape(-1)
+    b_returns = returns.reshape(-1)
+    b_values = val_buf.reshape(-1)
 
     if eps_rewards:
         state, info = envs.reset()
