@@ -16,10 +16,12 @@ num_update_epochs = 1
 capture_video     = False
 run_name          = "ppo_cartpole"
 
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
 batch_size     = num_steps * num_envs
 num_iterations = total_timesteps // batch_size
 
-class Policy(nn.Module):
+class Agent(nn.Module):
     def __init__(self, envs, hidden_dim):
         super().__init__()
         obs_dim = np.array(envs.single_observation_space.shape).prod()
@@ -81,7 +83,7 @@ state, info = envs.reset()
 done = False
 truncated = False
 
-policy = Policy(envs, hidden_dim)
+agent = Agent(envs, hidden_dim)
 opt = optim.Adam(policy.parameters(), lr=lr)
 
 obs_buf   = torch.zeros(num_steps, num_envs, obs_dim)
@@ -89,38 +91,41 @@ act_buf   = torch.zeros(num_steps, num_envs)
 rew_buf   = torch.zeros(num_steps, num_envs)
 done_buf  = torch.zeros(num_steps, num_envs)
 logp_buf  = torch.zeros(num_steps, num_envs)
+val_buf   = torch.zeros(num_steps, num_envs)
+
+obs = torch.Tensor(state).to(device)
+done = torch.zeros(num_envs).to(device)
+
+global_step = 0
+
+for i in range(1, num_iterations + 1):
+
+    for step in range(num_steps):
+        global_step += num_envs
+
+        obs_buf[step] = obs
+        done_buf[step] = done
+
+        # sample action 
+        with torch.no_grad():
+            action, logprob, _, value = agent.get_action_and_value(obs)
+            val_buf[step] = value.flatten()
+
+        actions[step] = action
+        logp_buf[step] = logprob
+
+        obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
+        done = np.logical_or(terminations, truncations)
+        rew_buf[step] = torch.tensor(reward).to(device).view(-1)
+        obs, done = torch.Tensor(obs).to(device), torch.Tensor(done).to(device)
+
+        if "final_info" in infos:
+            for info in infos["final_info"]:
+                if info and "episode" in info:
+                    print(f"step={global_step}, episodic_return={info['episode']['r']}")
+        
 
 
-for i in range(num_iterations):
-
-    log_probs = []
-    eps_rewards = []
-
-    returns = []
-    for j in range(batch_size):
-        if done or truncated:
-            state, info = envs.reset()
-
-            eps_returns = []
-            G = 0
-            for r in reversed(eps_rewards):
-                G = r + gamma * G
-                eps_returns.insert(0, G)
-            returns += eps_returns
-
-            print(f"Episodic rewards: {sum(eps_rewards)}")
-            eps_rewards = []
-
-            done = False
-            truncated = False
-
-
-        action, log_prob = policy.get_action(torch.tensor(state, dtype=torch.float32))
-
-        state, reward, done, truncated, info = envs.step(action.numpy())
-
-        eps_rewards.append(reward)
-        log_probs.append(log_prob)
 
     if eps_rewards:
         state, info = envs.reset()
