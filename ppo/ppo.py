@@ -13,14 +13,19 @@ gamma             = 0.99
 gae_lambda        = 0.95
 total_timesteps   = 100_000
 num_steps         = 128
+num_minibatches   = 4
 num_update_epochs = 1
 clip_coeff        = 0.2
+entropy_coeff     = 0.01
+vf_coeff          = 0.5
+max_grad_norm     = 0.5
 capture_video     = False
 run_name          = "ppo_cartpole"
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 batch_size     = num_steps * num_envs
+minibatch_size = batch_size // num_minibatches
 num_iterations = total_timesteps // batch_size
 
 class Agent(nn.Module):
@@ -152,31 +157,44 @@ for i in range(1, num_iterations + 1):
     b_returns = returns.reshape(-1)
     b_values = val_buf.reshape(-1)
 
-    if eps_rewards:
-        state, info = envs.reset()
+    b_inds = np.arange(batch_size)
+    clipfracs = []
 
-        eps_returns = []
-        G = 0
-        for r in reversed(eps_rewards):
-            G = r + gamma * G
-            eps_returns.insert(0, G)
-        returns += eps_returns
+    for epoch in range(num_update_epochs):
+        np.random.shuffle(b_inds)
 
-        # print(f"Episodic rewards: {sum(eps_rewards)}")
-        eps_rewards = []
+        for start in range(0, batch_size, minibatch_size):
+            end = start + minibatch_size
+            
+            mb_inds = b_inds[start:end]
 
-        done = False
-        truncated = False
+            _, logprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
+            log_ratio = log_ratio - b_logprobs[mb_inds]
+            ratio = log_ratio.exp()
 
+            with torch.no_grad():
+                old_approx_kl = (-logratio).mean()
+                approx_kl = ((ratio - 1) - log_ratio).mean()
+                clipfracs += [((ratio - 1.0).abs() > clip_coeff).float().mean().item()]
 
-    returns = torch.tensor(returns, dtype=torch.float32)
-    returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+            mb_advs = b_advantages[mb_inds]
 
-    log_probs = torch.stack(log_probs)
+            mb_advs = (mb_advs - mb_advs.mean())/(mb_advs.std + 1e-8)
 
-    opt.zero_grad()
-    loss = -(log_probs * returns).mean()
-    loss.backward()
-    opt.step()
+            pg_loss1 = -mb_advs * ratio
+            pg_loss2 = -mb_advs * torch.clamp(ratio, 1-clip_coeff, 1+clip_coeff)
+
+            pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+
+            v_loss = 0.5 * ((newvalue - b_returns[mb_ids]) ** 2).mean()
+
+            entropy_loss = entropy.mean()
+            loss = pg_loss + v_loss * vf_coeff - entropy_loss * entropy_coeff
+
+            optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(agent.parameters(), max_grad_norm)
+            optimizer.step()
+
 
 envs.close()
