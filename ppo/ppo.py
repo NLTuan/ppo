@@ -19,7 +19,7 @@ clip_coeff			= 0.2
 entropy_coeff		= 0.00
 vf_coeff			= 0.5
 max_grad_norm		= 0.5
-capture_video		= False
+capture_video		= True
 run_name			= "ppo_cartpole"
 
 writer = SummaryWriter(f"runs/{run_name}")
@@ -212,3 +212,18 @@ for i in range(1, num_iterations + 1):
 
 envs.close()
 writer.close()
+
+if capture_video:
+    print("Recording final evaluation video...")
+    eval_env = gym.make(env_id, render_mode="rgb_array")
+    eval_env = gym.wrappers.RecordVideo(eval_env, f"videos/{run_name}_eval")
+    obs, info = eval_env.reset()
+    done = False
+    truncated = False
+    while not (done or truncated):
+        with torch.no_grad():
+            obs_tensor = torch.Tensor(obs).unsqueeze(0).to(device)
+            action, _, _, _ = agent.get_action_and_value(obs_tensor)
+        obs, reward, done, truncated, info = eval_env.step(action.cpu().numpy()[0])
+    eval_env.close()
+    print("Video recording saved!")
