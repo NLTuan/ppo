@@ -6,22 +6,31 @@ import torch.nn.functional as F
 from torch.distributions import Normal
 from torch.utils.tensorboard import SummaryWriter
 
-env_id				= "Pendulum-v1" # Continuous action environment
-num_envs			= 4
-hidden_dim			= 128
-lr					= 0.0003
-gamma				= 0.99
-gae_lambda			= 0.95
-total_timesteps		= 1_000_000
-num_steps			= 2048
-num_minibatches		= 32
-num_update_epochs	= 10
-clip_coeff			= 0.2
-entropy_coeff		= 0.00
-vf_coeff			= 0.5
-max_grad_norm		= 0.5
-capture_video		= True
-run_name			= "ppo_continuous"
+import argparse
+from configs import CONFIGS
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--env", type=str, default="HalfCheetah-v5", choices=CONFIGS.keys())
+args = parser.parse_args()
+
+cfg = CONFIGS[args.env]
+
+env_id				= cfg.env_id
+num_envs			= cfg.num_envs
+hidden_dim			= cfg.hidden_dim
+lr					= cfg.lr
+gamma				= cfg.gamma
+gae_lambda			= cfg.gae_lambda
+total_timesteps		= cfg.total_timesteps
+num_steps			= cfg.num_steps
+num_minibatches		= cfg.num_minibatches
+num_update_epochs	= cfg.num_update_epochs
+clip_coeff			= cfg.clip_coeff
+entropy_coeff		= cfg.entropy_coeff
+vf_coeff			= cfg.vf_coeff
+max_grad_norm		= cfg.max_grad_norm
+capture_video		= cfg.capture_video
+run_name			= cfg.run_name
 
 writer = SummaryWriter(f"runs/{run_name}")
 writer.add_text(
