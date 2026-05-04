@@ -5,22 +5,22 @@ from torch import nn, optim
 import torch.nn.functional as F
 from torch.distributions import Categorical
 from torch.utils.tensorboard import SummaryWriter
-env_id            = "CartPole-v1"
-num_envs          = 4
-hidden_dim        = 64
-lr                = 0.002
-gamma             = 0.99
-gae_lambda        = 0.95
-total_timesteps   = 200_000
-num_steps         = 128
-num_minibatches   = 4
-num_update_epochs = 4
-clip_coeff        = 0.2
-entropy_coeff     = 0.00
-vf_coeff          = 0.5
-max_grad_norm     = 0.5
-capture_video     = False
-run_name          = "ppo_cartpole"
+env_id				= "CartPole-v1"
+num_envs			= 4
+hidden_dim			= 64
+lr					= 0.002
+gamma				= 0.99
+gae_lambda			= 0.95
+total_timesteps		= 200_000
+num_steps			= 128
+num_minibatches		= 4
+num_update_epochs	= 4
+clip_coeff			= 0.2
+entropy_coeff		= 0.00
+vf_coeff			= 0.5
+max_grad_norm		= 0.5
+capture_video		= False
+run_name			= "ppo_cartpole"
 
 writer = SummaryWriter(f"runs/{run_name}")
 writer.add_text(
@@ -30,9 +30,9 @@ writer.add_text(
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-batch_size     = num_steps * num_envs
-minibatch_size = batch_size // num_minibatches
-num_iterations = total_timesteps // batch_size
+batch_size			= num_steps * num_envs
+minibatch_size		= batch_size // num_minibatches
+num_iterations		= total_timesteps // batch_size
 
 class Agent(nn.Module):
     def __init__(self, envs, hidden_dim):
@@ -99,12 +99,12 @@ truncated = False
 agent = Agent(envs, hidden_dim).to(device)
 optimizer = optim.Adam(agent.parameters(), lr=lr, eps=1e-5)
 
-obs_buf   = torch.zeros(num_steps, num_envs, obs_dim).to(device)
-act_buf   = torch.zeros(num_steps, num_envs).to(device)
-rew_buf   = torch.zeros(num_steps, num_envs).to(device)
-done_buf  = torch.zeros(num_steps, num_envs).to(device)
-logp_buf  = torch.zeros(num_steps, num_envs).to(device)
-val_buf   = torch.zeros(num_steps, num_envs).to(device)
+obs_buf		= torch.zeros(num_steps, num_envs, obs_dim).to(device)
+act_buf		= torch.zeros(num_steps, num_envs).to(device)
+rew_buf		= torch.zeros(num_steps, num_envs).to(device)
+done_buf	= torch.zeros(num_steps, num_envs).to(device)
+logp_buf	= torch.zeros(num_steps, num_envs).to(device)
+val_buf		= torch.zeros(num_steps, num_envs).to(device)
 
 obs = torch.Tensor(state).to(device)
 done = torch.zeros(num_envs).to(device)
