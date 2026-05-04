@@ -4,23 +4,29 @@ import torch
 from torch import nn, optim
 import torch.nn.functional as F
 from torch.distributions import Categorical
-
+from torch.utils.tensorboard import SummaryWriter
 env_id            = "CartPole-v1"
 num_envs          = 4
-hidden_dim        = 256
-lr                = 3e-4
+hidden_dim        = 64
+lr                = 0.002
 gamma             = 0.99
 gae_lambda        = 0.95
-total_timesteps   = 100_000
+total_timesteps   = 200_000
 num_steps         = 128
 num_minibatches   = 4
-num_update_epochs = 1
+num_update_epochs = 4
 clip_coeff        = 0.2
-entropy_coeff     = 0.01
+entropy_coeff     = 0.00
 vf_coeff          = 0.5
 max_grad_norm     = 0.5
 capture_video     = False
 run_name          = "ppo_cartpole"
+
+writer = SummaryWriter(f"runs/{run_name}")
+writer.add_text(
+    "hyperparameters",
+    "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars().items() if not key.startswith("_") and isinstance(value, (int, float, str, bool))])),
+)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -126,10 +132,12 @@ for i in range(1, num_iterations + 1):
         rew_buf[step] = torch.tensor(reward).to(device).view(-1)
         obs, done = torch.Tensor(obs).to(device), torch.Tensor(done).to(device)
 
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if info and "episode" in info:
-                    print(f"step={global_step}, episodic_return={info['episode']['r']}")
+        if "episode" in infos:
+            for i in range(num_envs):
+                if infos["episode"]["_r"][i]:
+                    print(f"step={global_step}, episodic_return={infos['episode']['r'][i]}")
+                    writer.add_scalar("charts/episodic_return", infos["episode"]["r"][i], global_step)
+                    writer.add_scalar("charts/episodic_length", infos["episode"]["l"][i], global_step)
     with torch.no_grad():
         next_value = agent.get_value(obs).reshape(1, -1)
         advantages = torch.zeros_like(rew_buf).to(device)
@@ -194,5 +202,13 @@ for i in range(1, num_iterations + 1):
             nn.utils.clip_grad_norm_(agent.parameters(), max_grad_norm)
             optimizer.step()
 
+    writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
+    writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
+    writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
+    writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
+    writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
+    writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
+
 
 envs.close()
+writer.close()
